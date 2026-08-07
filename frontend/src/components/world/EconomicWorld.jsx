@@ -13,6 +13,8 @@ import '@xyflow/react/dist/style.css';
 import GovernmentNode from './GovernmentNode';
 import BusinessNode from './BusinessNode';
 import CitizenGroupNode from './CitizenGroupNode';
+import BankNode from './BankNode';
+import MoneyFlowEdge from './MoneyFlowEdge';
 import WorldTooltip from './WorldTooltip';
 import WorldInspector from './WorldInspector';
 import { getWorldState } from '../../api/simulations';
@@ -20,11 +22,19 @@ import { transformWorldToGraph } from '../../utils/worldGraph';
 
 const nodeTypes = {
   government: GovernmentNode,
+  bank: BankNode,
   business: BusinessNode,
   citizenGroup: CitizenGroupNode,
 };
 
-function FlowCanvas({ simulationId, liveState, displayWorld, baseline, impactDeltas, impactMode, viewMode, viewedTick }) {
+const edgeTypes = {
+  moneyFlow: MoneyFlowEdge,
+};
+
+
+
+function FlowCanvas({ simulationId, liveState, displayWorld, baseline, impactDeltas, impactMode, viewMode, viewedTick, onOpenWhyModal }) {
+
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rawWorldData, setRawWorldData] = useState(null);
@@ -265,8 +275,10 @@ function FlowCanvas({ simulationId, liveState, displayWorld, baseline, impactDel
             nodes={styledNodes}
             edges={styledEdges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
             onNodeMouseEnter={onNodeMouseEnter}
@@ -296,8 +308,10 @@ function FlowCanvas({ simulationId, liveState, displayWorld, baseline, impactDel
           viewMode={viewMode}
           viewedTick={viewedTick}
           onClose={() => setSelectedNodeId(null)}
+          onOpenWhyModal={onOpenWhyModal}
         />
       )}
+
     </div>
   );
 }
@@ -310,7 +324,8 @@ export default function EconomicWorld({
   impactDeltas,
   impactMode,
   viewMode,
-  viewedTick
+  viewedTick,
+  onOpenWhyModal
 }) {
   return (
     <ReactFlowProvider>
@@ -323,9 +338,11 @@ export default function EconomicWorld({
         impactMode={impactMode}
         viewMode={viewMode}
         viewedTick={viewedTick}
+        onOpenWhyModal={onOpenWhyModal}
       />
     </ReactFlowProvider>
   );
 }
+
 
 

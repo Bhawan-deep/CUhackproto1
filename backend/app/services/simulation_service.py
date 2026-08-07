@@ -25,6 +25,9 @@ from app.schemas.state import (
     TickResult,
 )
 from app.simulation.mock_engine import MockSimulationEngine
+from app.models.simulation import AgentDecisionRecord, CausalEvent
+from app.explainability.trace_builder import TraceBuilder
+
 
 SUPPORTED_EVENTS = {"flood", "recession", "boom", "factory_closure", "investment_stimulus"}
 
@@ -233,8 +236,60 @@ class SimulationService:
             )
             db.add(snapshot_obj)
 
+            # Persist agent decision records
+            decisions = getattr(engine, "latest_agent_decisions", [])
+            for dec in decisions:
+                rec = AgentDecisionRecord(
+                    simulation_id=sim.id,
+                    tick=engine.tick,
+                    agent_type=dec.get("agent_type", "unknown"),
+                    action_type=dec.get("action_type", "unknown"),
+                    decision_payload=dec.get("decision_payload", {}),
+                    reasoning_summary=dec.get("reasoning_summary", ""),
+                    provider=dec.get("provider", "mock")
+                )
+                db.add(rec)
+
+            # Build and persist causal events
+            try:
+                from app.explainability.delta_analyzer import DeltaAnalyzer
+                from app.explainability.causal_trace import CausalTraceBuilder
+                prev_snap = db.query(Snapshot).filter(
+                    Snapshot.simulation_id == sim.id,
+                    Snapshot.tick == engine.tick - 1
+                ).first()
+                pre_st = prev_snap.state if prev_snap else {}
+                deltas = DeltaAnalyzer.analyze(pre_st, export_data)
+                trace_res = CausalTraceBuilder.build_trace(
+                    str(sim.id), engine.tick, pre_st, export_data, deltas, decisions
+                )
+                for ev in trace_res.get("events", []):
+                    c_ev = CausalEvent(
+                        simulation_id=sim.id,
+                        tick=engine.tick,
+                        source_type=ev["source_type"],
+                        source_id=str(ev["source_id"]) if ev.get("source_id") else None,
+                        cause_type=ev["cause_type"],
+                        action=ev["action"],
+                        target_type=ev["target_type"],
+                        target_id=str(ev["target_id"]) if ev.get("target_id") else None,
+                        metric=ev["metric"],
+                        before_value=ev.get("before_value"),
+                        after_value=ev.get("after_value"),
+                        delta=ev.get("delta"),
+                        parent_event_id=ev.get("parent_event_id"),
+                        confidence=ev.get("confidence", "deterministic"),
+                        description=ev.get("description", ""),
+                        causal_metadata=ev.get("metadata", {})
+                    )
+                    db.add(c_ev)
+            except Exception as e:
+                print(f"[Warning] Failed to generate causal events at tick {engine.tick}: {e}")
+
+
             # Commit transaction atomically
             db.commit()
+
         except Exception:
             db.rollback()
             raise
@@ -1002,3 +1057,57 @@ class SimulationService:
             db.rollback()
             print(f"[Warning] Failed to normalize stale simulations on startup: {e}")
             return 0
+
+    @classmethod
+    def get_agent_decision_history(cls, db: Session, simulation_id: UUID) -> List[Dict[str, Any]]:
+        records = db.query(AgentDecisionRecord).filter(
+            AgentDecisionRecord.simulation_id == simulation_id
+        ).order_by(AgentDecisionRecord.tick.asc()).all()
+        return [
+            {
+                "id": str(r.id),
+                "simulation_id": str(r.simulation_id),
+                "tick": r.tick,
+                "agent_type": r.agent_type,
+                "action_type": r.action_type,
+                "decision_payload": r.decision_payload,
+                "reasoning_summary": r.reasoning_summary,
+                "provider": r.provider,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in records
+        ]
+
+    @classmethod
+    def get_agent_decisions_by_tick(cls, db: Session, simulation_id: UUID, tick: int) -> List[Dict[str, Any]]:
+        records = db.query(AgentDecisionRecord).filter(
+            AgentDecisionRecord.simulation_id == simulation_id,
+            AgentDecisionRecord.tick == tick
+        ).all()
+        return [
+            {
+                "id": str(r.id),
+                "simulation_id": str(r.simulation_id),
+                "tick": r.tick,
+                "agent_type": r.agent_type,
+                "action_type": r.action_type,
+                "decision_payload": r.decision_payload,
+                "reasoning_summary": r.reasoning_summary,
+                "provider": r.provider,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in records
+        ]
+
+    @classmethod
+    def get_tick_explanation(cls, db: Session, simulation_id: UUID, tick: int) -> Dict[str, Any]:
+        return TraceBuilder.get_tick_explanation(db, simulation_id, tick)
+
+    @classmethod
+    def get_entity_explanation(cls, db: Session, simulation_id: UUID, tick: int, entity_id: str) -> Dict[str, Any]:
+        return TraceBuilder.get_entity_explanation(db, simulation_id, tick, entity_id)
+
+    @classmethod
+    def get_range_explanation(cls, db: Session, simulation_id: UUID, from_tick: int, to_tick: int) -> Dict[str, Any]:
+        return TraceBuilder.get_range_explanation(db, simulation_id, from_tick, to_tick)
+

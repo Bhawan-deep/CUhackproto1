@@ -1,14 +1,15 @@
 import React from 'react';
 import { X, Landmark, Building2, UserCheck, Activity, DollarSign, Users, Award, AlertTriangle, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 
-export default function WorldInspector({ selectedNode, baseline, impactDeltas, viewMode, viewedTick, onClose }) {
+import { HelpCircle } from 'lucide-react';
+
+export default function WorldInspector({ selectedNode, baseline, impactDeltas, viewMode, viewedTick, onClose, onOpenWhyModal }) {
   if (!selectedNode) return null;
 
   const { data, type } = selectedNode;
   const nodeId = String(selectedNode.id);
 
   const isReplay = viewMode === 'REPLAY';
-
 
   // Extract delta info for this specific node if baseline exists
   let nodeDelta = null;
@@ -48,8 +49,20 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, v
         </button>
       </div>
 
+      {/* Signature Feature: WHY DID THIS CHANGE? Button */}
+      <div className="p-3 border-b border-slate-800 bg-slate-900/60">
+        <button
+          onClick={() => onOpenWhyModal && onOpenWhyModal(nodeId)}
+          className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono text-xs font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-amber-500/20 transition-all duration-300"
+        >
+          <HelpCircle className="w-4 h-4" />
+          <span>WHY DID THIS CHANGE?</span>
+        </button>
+      </div>
+
       {/* Body Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs">
+
         {/* REPLAY MODE HISTORICAL BANNER */}
         {isReplay && (
           <div className="p-2.5 rounded-lg bg-amber-950/70 border border-amber-500/50 flex items-center justify-between text-amber-200">
@@ -116,6 +129,28 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, v
         )}
 
         {/* STANDARD METRICS */}
+        {type === 'bank' && (
+          <div className="p-3 rounded-lg bg-purple-950/40 border border-purple-500/40 space-y-2.5">
+            <span className="text-[10px] text-purple-300 block uppercase font-bold">Central Bank Monetary Policy</span>
+            <div className="flex justify-between items-center text-slate-200">
+              <span>Interest Rate:</span>
+              <span className="font-bold text-purple-400 text-sm">{((data.bank?.interest_rate || 0.05) * 100).toFixed(2)}%</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-200">
+              <span>Bank Reserves:</span>
+              <span className="font-bold text-slate-200">${Math.round((data.bank?.reserves || 1000000) / 1000).toLocaleString()}k</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-200">
+              <span>Default Rate:</span>
+              <span className="font-bold text-amber-400">{((data.bank?.default_rate || 0.02) * 100).toFixed(1)}%</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-200">
+              <span>Decision Provider:</span>
+              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold text-[9px]">DETERMINISTIC MOCK</span>
+            </div>
+          </div>
+        )}
+
         {type === 'government' && (
           <>
             <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2">
@@ -127,6 +162,10 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, v
               <div className="flex justify-between items-center text-slate-200">
                 <span>Infrastructure Spend:</span>
                 <span className="font-bold text-sky-400">${(data.infrastructure_spending || 0).toLocaleString()}/mo</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-200">
+                <span>Healthcare Spend:</span>
+                <span className="font-bold text-rose-400">${(data.healthcare_spending || 30000).toLocaleString()}/mo</span>
               </div>
             </div>
 
@@ -171,6 +210,25 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, v
               </div>
             </div>
 
+            {/* Strategic Game Theory Section */}
+            <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2">
+              <span className="text-[10px] text-slate-500 block uppercase font-bold">Strategic Game Posture</span>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Personality:</span>
+                <span className="font-bold text-amber-400 uppercase">{data.personality || 'NEUTRAL'}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Last Rival Move:</span>
+                <span className={`font-bold ${data.last_game_move === 'DEFECT' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {data.last_game_move === 'DEFECT' ? '⚔ DEFECT' : '🤝 COOPERATE'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Capital Reserves:</span>
+                <span className="font-bold text-sky-400">${Math.round(data.capital || 50000).toLocaleString()}</span>
+              </div>
+            </div>
+
             <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2">
               <span className="text-[10px] text-slate-500 block uppercase font-bold">Financial Performance</span>
               <div className="flex justify-between items-center text-slate-300">
@@ -190,6 +248,7 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, v
             </div>
           </>
         )}
+
 
         {type === 'citizenGroup' && (
           <>

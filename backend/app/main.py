@@ -46,6 +46,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Register API routes under /api prefix
 app.include_router(api_router, prefix="/api")
 

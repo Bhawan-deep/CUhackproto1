@@ -21,6 +21,8 @@ class CitizenState(BaseModel):
     employed: bool
     employer_id: Optional[UUID] = None
     satisfaction: float = Field(ge=0.0, le=1.0)
+    trust: float = Field(default=0.70, ge=0.0, le=1.0)
+    tax_compliance: float = Field(default=0.85, ge=0.0, le=1.0)
     current_goal: str
     recent_decisions: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -37,6 +39,10 @@ class BusinessState(BaseModel):
     expenses: float
     profit: float
     health: float = Field(ge=0.0, le=1.0)
+    capital: float = Field(default=50000.0)
+    personality: str = Field(default="NEUTRAL")
+    rival_business_id: Optional[UUID] = None
+    last_game_move: Optional[str] = "COOPERATE"
     current_goal: str
     recent_decisions: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -48,8 +54,10 @@ class GovernmentStateSchema(BaseModel):
     simulation_id: UUID
     tax_rate: float = Field(default=0.20, ge=0.0, le=0.60)
     infrastructure_spending: float = Field(default=50000.0, ge=0.0)
+    healthcare_spending: float = Field(default=30000.0, ge=0.0)
     treasury: float = 1000000.0
     public_satisfaction: float = Field(default=0.70, ge=0.0, le=1.0)
+    inflation_rate: float = Field(default=0.02, ge=0.0)
 
     model_config = ConfigDict(from_attributes=True)
 

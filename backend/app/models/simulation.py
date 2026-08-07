@@ -160,3 +160,44 @@ class ParallelExperiment(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+
+class AgentDecisionRecord(Base):
+    __tablename__ = "agent_decisions"
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    simulation_id = Column(Uuid(as_uuid=True), ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tick = Column(Integer, nullable=False, index=True)
+    agent_type = Column(String(50), nullable=False)
+    action_type = Column(String(100), nullable=False)
+    decision_payload = Column(JSON, nullable=False, default=dict)
+    reasoning_summary = Column(String(1000), nullable=False)
+    provider = Column(String(50), nullable=False, default="mock")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class CausalEvent(Base):
+    __tablename__ = "causal_events"
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    simulation_id = Column(Uuid(as_uuid=True), ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False, index=True)
+    tick = Column(Integer, nullable=False, index=True)
+    source_type = Column(String(50), nullable=False)
+    source_id = Column(String(255), nullable=True)
+    cause_type = Column(String(100), nullable=False)
+    action = Column(String(255), nullable=False)
+    target_type = Column(String(50), nullable=False)
+    target_id = Column(String(255), nullable=True)
+    metric = Column(String(100), nullable=False)
+    before_value = Column(Float, nullable=True)
+    after_value = Column(Float, nullable=True)
+    delta = Column(Float, nullable=True)
+    parent_event_id = Column(Uuid(as_uuid=True), nullable=True)
+    confidence = Column(String(50), nullable=False, default="deterministic")
+    description = Column(String(1000), nullable=False)
+    causal_metadata = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+
+
+

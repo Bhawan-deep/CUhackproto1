@@ -73,6 +73,15 @@ class MockSimulationEngine(SimulationEngine):
             treasury=1000000.0,
             public_satisfaction=0.70,
         )
+        self.bank: Dict[str, Any] = {
+            "interest_rate": 0.05,
+            "reserves": 1000000.0,
+            "default_rate": 0.02,
+            "total_loans": 0,
+            "approved_loans": 0,
+            "rejected_loans": 0,
+        }
+        self.manual_policy_lock_ticks: int = 0
         self.active_events: List[EventState] = []
         self.current_metrics: Optional[EconomicMetrics] = None
 
@@ -82,25 +91,38 @@ class MockSimulationEngine(SimulationEngine):
         seed: int,
         initial_policy: Optional[Dict[str, Any]] = None
     ) -> None:
-        self.simulation_id = simulation_id
+        sim_id_val = simulation_id or uuid.uuid4()
+        self.simulation_id = sim_id_val
         self.seed = seed
         self.tick = 0
         self.rng = random.Random(seed)
+        self.manual_policy_lock_ticks = 0
         
         tax_rate = initial_policy.get("tax_rate", 0.20) if initial_policy else 0.20
         infra_spending = initial_policy.get("infrastructure_spending", 50000.0) if initial_policy else 50000.0
 
         self.government = GovernmentStateSchema(
-            simulation_id=simulation_id,
+            simulation_id=sim_id_val,
             tax_rate=tax_rate,
             infrastructure_spending=infra_spending,
+            healthcare_spending=30000.0,
             treasury=1000000.0,
-            public_satisfaction=0.70
+            public_satisfaction=0.70,
+            inflation_rate=0.02,
         )
+        self.bank = {
+            "interest_rate": 0.05,
+            "reserves": 1000000.0,
+            "default_rate": 0.02,
+            "total_loans": 12,
+            "approved_loans": 10,
+            "rejected_loans": 2,
+        }
         self.active_events = []
 
-        # Generate 12 Businesses
+        # Generate 12 Businesses with Personalities & Paired Rivalries
         self.businesses = []
+        personalities = ["AGGRESSIVE", "CONSERVATIVE", "INNOVATIVE", "NEUTRAL"]
         for i in range(12):
             industry = INDUSTRIES[i % len(INDUSTRIES)]
             name = f"{industry} Corp {i + 1}"
@@ -110,7 +132,7 @@ class MockSimulationEngine(SimulationEngine):
             
             business = BusinessState(
                 id=uuid.uuid4(),
-                simulation_id=simulation_id,
+                simulation_id=sim_id_val,
                 name=name,
                 industry=industry,
                 employee_count=0,
@@ -118,6 +140,9 @@ class MockSimulationEngine(SimulationEngine):
                 expenses=base_expenses,
                 profit=profit,
                 health=round(self.rng.uniform(0.75, 0.95), 2),
+                capital=round(self.rng.uniform(40000.0, 100000.0), 2),
+                personality=personalities[i % len(personalities)],
+                last_game_move="COOPERATE",
                 current_goal=self.rng.choice(BUSINESS_GOALS),
                 recent_decisions=[{
                     "tick": 0,
@@ -126,6 +151,12 @@ class MockSimulationEngine(SimulationEngine):
                 }]
             )
             self.businesses.append(business)
+
+        # Pair rivalries (b[i] rival with b[(i+1)%12])
+        for i in range(len(self.businesses)):
+            rival_idx = (i + 1) % len(self.businesses)
+            self.businesses[i].rival_business_id = self.businesses[rival_idx].id
+
 
         # Generate 100 Citizens
         self.citizens = []
@@ -148,7 +179,7 @@ class MockSimulationEngine(SimulationEngine):
             
             citizen = CitizenState(
                 id=uuid.uuid4(),
-                simulation_id=simulation_id,
+                simulation_id=sim_id_val,
                 name=f"Citizen_{i + 1}",
                 age=self.rng.randint(20, 65),
                 occupation=occ,
@@ -157,6 +188,8 @@ class MockSimulationEngine(SimulationEngine):
                 employed=is_employed,
                 employer_id=employer_id,
                 satisfaction=round(self.rng.uniform(0.60, 0.90), 2) if is_employed else round(self.rng.uniform(0.30, 0.55), 2),
+                trust=0.70,
+                tax_compliance=0.85,
                 current_goal=self.rng.choice(CITIZEN_GOALS),
                 recent_decisions=[{
                     "tick": 0,
@@ -170,8 +203,56 @@ class MockSimulationEngine(SimulationEngine):
 
     def step(self) -> TickResult:
         self.tick += 1
-        
+
+        # 0. Autonomous Agent Decision Cycle (Phase 8 Foundation)
+        try:
+            import asyncio
+            from app.agents.observation_builder import ObservationBuilder
+            from app.agents.mock_provider import MockAgentDecisionProvider
+            from app.agents.decision_applicator import AgentDecisionApplicator
+
+            obs = ObservationBuilder.build_observation(self, str(self.simulation_id), self.tick)
+
+            bundle = MockAgentDecisionProvider().decide_sync(obs)
+
+            AgentDecisionApplicator.apply_decisions(self, bundle)
+
+            self.latest_agent_decisions = [
+                {
+                    "agent_type": "finance",
+                    "action_type": "tax_policy_adjustment",
+                    "decision_payload": {"tax_rate_delta": bundle.finance.tax_rate_delta},
+                    "reasoning_summary": bundle.finance.reasoning_summary,
+                    "provider": bundle.provider
+                },
+                {
+                    "agent_type": "health",
+                    "action_type": "healthcare_spending_adjustment",
+                    "decision_payload": {"spending_delta": bundle.health.spending_delta},
+                    "reasoning_summary": bundle.health.reasoning_summary,
+                    "provider": bundle.provider
+                },
+                {
+                    "agent_type": "infrastructure",
+                    "action_type": "infra_spending_adjustment",
+                    "decision_payload": {"spending_delta": bundle.infrastructure.spending_delta},
+                    "reasoning_summary": bundle.infrastructure.reasoning_summary,
+                    "provider": bundle.provider
+                },
+                {
+                    "agent_type": "bank",
+                    "action_type": "interest_rate_adjustment",
+                    "decision_payload": {"interest_rate_delta": bundle.bank.interest_rate_delta},
+                    "reasoning_summary": bundle.bank.reasoning_summary,
+                    "provider": bundle.provider
+                }
+            ]
+        except Exception as e:
+            print(f"[Warning] Autonomous agent evaluation failed at tick {self.tick}: {e}")
+            self.latest_agent_decisions = []
+
         # 1. Process active events
+
         event_impact = {"revenue_mult": 1.0, "hiring_mult": 1.0, "satisfaction_mult": 1.0}
         remaining_events = []
         for ev in self.active_events:
@@ -195,15 +276,40 @@ class MockSimulationEngine(SimulationEngine):
                 remaining_events.append(ev)
         self.active_events = remaining_events
 
-        # 2. Infrastructure spending boost
+        # 2. Banking Interest Rate Impact
+        interest_rate = float(self.bank.get("interest_rate", 0.05))
+        borrowing_mult = max(0.70, min(1.30, 1.0 - 2.0 * (interest_rate - 0.05)))
+
+        # 3. Infrastructure spending boost
         infra_boost = 1.0 + min(0.15, (self.government.infrastructure_spending / 500000.0))
 
-        # 3. Update Businesses
+        # Build fast business lookup map for Game Theory Payoffs
+        biz_map = {b.id: b for b in self.businesses}
+
+        # 4. Update Businesses
         for biz in self.businesses:
             noise = self.rng.uniform(0.95, 1.05)
-            biz.revenue = round(biz.revenue * noise * event_impact["revenue_mult"] * infra_boost, 2)
+
+            # Controlled Game Theory Payoff (Constraint #3: Single-Counted multiplier on revenue)
+            game_payoff_mult = 1.0
+            if biz.rival_business_id and biz.rival_business_id in biz_map:
+                rival = biz_map[biz.rival_business_id]
+                my_move = getattr(biz, "last_game_move", "COOPERATE") or "COOPERATE"
+                rival_move = getattr(rival, "last_game_move", "COOPERATE") or "COOPERATE"
+
+                if my_move == "COOPERATE" and rival_move == "COOPERATE":
+                    game_payoff_mult = 1.02  # Both gain moderate benefit
+                elif my_move == "DEFECT" and rival_move == "COOPERATE":
+                    game_payoff_mult = 1.05  # Defector gains short term advantage
+                elif my_move == "COOPERATE" and rival_move == "DEFECT":
+                    game_payoff_mult = 0.96  # Cooperator suffers loss
+                elif my_move == "DEFECT" and rival_move == "DEFECT":
+                    game_payoff_mult = 0.97  # Both suffer weak outcome
+
+            biz.revenue = round(biz.revenue * noise * event_impact["revenue_mult"] * infra_boost * borrowing_mult * game_payoff_mult, 2)
             biz.expenses = round(biz.expenses * self.rng.uniform(0.97, 1.03), 2)
             biz.profit = round(biz.revenue - biz.expenses, 2)
+            biz.capital = round(max(0.0, biz.capital + (biz.profit * 0.20)), 2)
             
             # Update Business Health
             if biz.profit > 0:
@@ -214,10 +320,10 @@ class MockSimulationEngine(SimulationEngine):
             # Small hiring/firing decision
             decision_action = "maintained_workforce"
             decision_reason = "Stable economic output"
-            if biz.health > 0.85 and self.rng.random() < (0.3 * event_impact["hiring_mult"]):
+            if biz.health > 0.85 and self.rng.random() < (0.3 * event_impact["hiring_mult"] * borrowing_mult):
                 biz.employee_count += 1
                 decision_action = "expanded_workforce"
-                decision_reason = "High business health and revenue profit"
+                decision_reason = "High business health and favorable borrowing conditions"
             elif biz.health < 0.40 and biz.employee_count > 1 and self.rng.random() < 0.3:
                 biz.employee_count -= 1
                 decision_action = "reduced_workforce"
@@ -232,14 +338,16 @@ class MockSimulationEngine(SimulationEngine):
             if len(biz.recent_decisions) > 10:
                 biz.recent_decisions = biz.recent_decisions[-10:]
 
-        # 4. Update Citizens (Income, Spending, Taxes)
+        # 5. Update Citizens (Income, Spending, Taxes with Compliance)
         total_tax_collected = 0.0
         tax_rate = self.government.tax_rate
 
         for cit in self.citizens:
+            compliance = getattr(cit, "tax_compliance", 0.85) or 0.85
             if cit.employed and cit.income > 0:
                 gross_income = cit.income / 12.0  # Monthly tick baseline
-                tax_paid = gross_income * tax_rate
+                gross_tax = gross_income * tax_rate
+                tax_paid = gross_tax * compliance  # Compliance dictates actual paid tax
                 disposable_income = gross_income - tax_paid
                 total_tax_collected += tax_paid
                 
@@ -248,6 +356,7 @@ class MockSimulationEngine(SimulationEngine):
                 savings = disposable_income - spending
                 cit.wealth = max(0.0, round(cit.wealth + savings, 2))
                 cit.satisfaction = min(1.0, round(cit.satisfaction + 0.01 * event_impact["satisfaction_mult"], 4))
+                cit.trust = min(1.0, round(cit.trust + 0.005, 4))
                 action = "saved_income"
                 reason = "Received salary payout"
             else:
@@ -255,6 +364,7 @@ class MockSimulationEngine(SimulationEngine):
                 spending = min(cit.wealth, 500.0)
                 cit.wealth = max(0.0, round(cit.wealth - spending, 2))
                 cit.satisfaction = max(0.0, round(cit.satisfaction - 0.02 * event_impact["satisfaction_mult"], 4))
+                cit.trust = max(0.0, round(cit.trust - 0.01, 4))
                 action = "drew_savings"
                 reason = "Covered basic expenses while seeking employment"
 
@@ -266,18 +376,19 @@ class MockSimulationEngine(SimulationEngine):
             if len(cit.recent_decisions) > 10:
                 cit.recent_decisions = cit.recent_decisions[-10:]
 
-        # 5. Update Government Treasury & Satisfaction
+        # 6. Update Government Treasury & Satisfaction
+        total_gov_spending = self.government.infrastructure_spending + getattr(self.government, "healthcare_spending", 30000.0)
         self.government.treasury = round(
-            self.government.treasury + total_tax_collected - self.government.infrastructure_spending, 2
+            self.government.treasury + total_tax_collected - total_gov_spending, 2
         )
         self.government.public_satisfaction = max(
-            0.0, min(1.0, round(self.government.public_satisfaction + (0.01 if total_tax_collected > self.government.infrastructure_spending else -0.01), 4))
+            0.0, min(1.0, round(self.government.public_satisfaction + (0.01 if total_tax_collected > total_gov_spending else -0.01), 4))
         )
 
-        # 6. Recalculate metrics
+        # 7. Recalculate metrics
         self.current_metrics = calculate_economic_metrics(self.citizens, self.businesses, self.government)
 
-        # 7. Formulate TickResult
+        # 8. Formulate TickResult
         total_citizens = len(self.citizens)
         employed_citizens = sum(1 for c in self.citizens if c.employed)
         
@@ -303,6 +414,8 @@ class MockSimulationEngine(SimulationEngine):
             "seed": self.seed,
             "tick": self.tick,
             "government": self.government.model_dump(mode="json"),
+            "bank": self.bank,
+            "manual_policy_lock_ticks": self.manual_policy_lock_ticks,
             "citizens": [c.model_dump(mode="json") for c in self.citizens],
             "businesses": [b.model_dump(mode="json") for b in self.businesses],
             "active_events": [e.model_dump(mode="json") for e in self.active_events],
@@ -326,6 +439,12 @@ class MockSimulationEngine(SimulationEngine):
             self.government.tax_rate = float(policy_data["tax_rate"])
         if "infrastructure_spending" in policy_data and policy_data["infrastructure_spending"] is not None:
             self.government.infrastructure_spending = float(policy_data["infrastructure_spending"])
+        if "healthcare_spending" in policy_data and policy_data["healthcare_spending"] is not None:
+            self.government.healthcare_spending = float(policy_data["healthcare_spending"])
+
+        # Explicit user policy change activates manual policy override lock for 5 ticks (Constraint #2)
+        self.manual_policy_lock_ticks = 5
+
         return PolicyState(
             tax_rate=self.government.tax_rate,
             infrastructure_spending=self.government.infrastructure_spending
@@ -361,6 +480,10 @@ class MockSimulationEngine(SimulationEngine):
                 "name": b.name,
                 "industry": b.industry,
                 "health": b.health,
+                "capital": getattr(b, "capital", 50000.0),
+                "personality": getattr(b, "personality", "NEUTRAL"),
+                "last_game_move": getattr(b, "last_game_move", "COOPERATE"),
+                "rival_id": str(b.rival_business_id) if getattr(b, "rival_business_id", None) else None,
                 "revenue": b.revenue,
                 "profit": b.profit,
                 "employee_count": b.employee_count
@@ -381,7 +504,9 @@ class MockSimulationEngine(SimulationEngine):
                     "employed_count": 0,
                     "total_income": 0.0,
                     "total_wealth": 0.0,
-                    "total_satisfaction": 0.0
+                    "total_satisfaction": 0.0,
+                    "total_trust": 0.0,
+                    "total_compliance": 0.0
                 }
             g = groups_dict[group_id]
             g["count"] += 1
@@ -390,6 +515,8 @@ class MockSimulationEngine(SimulationEngine):
             g["total_income"] += c.income
             g["total_wealth"] += c.wealth
             g["total_satisfaction"] += c.satisfaction
+            g["total_trust"] += getattr(c, "trust", 0.70)
+            g["total_compliance"] += getattr(c, "tax_compliance", 0.85)
 
         citizen_groups = []
         for g in groups_dict.values():
@@ -402,6 +529,8 @@ class MockSimulationEngine(SimulationEngine):
                 "average_income": round(g["total_income"] / cnt, 2) if cnt > 0 else 0.0,
                 "average_wealth": round(g["total_wealth"] / cnt, 2) if cnt > 0 else 0.0,
                 "average_satisfaction": round(g["total_satisfaction"] / cnt, 4) if cnt > 0 else 0.0,
+                "average_trust": round(g["total_trust"] / cnt, 4) if cnt > 0 else 0.70,
+                "average_tax_compliance": round(g["total_compliance"] / cnt, 4) if cnt > 0 else 0.85,
             })
 
         return {
@@ -411,16 +540,19 @@ class MockSimulationEngine(SimulationEngine):
                 "id": "government",
                 "tax_rate": self.government.tax_rate,
                 "infrastructure_spending": self.government.infrastructure_spending,
+                "healthcare_spending": getattr(self.government, "healthcare_spending", 30000.0),
                 "treasury": self.government.treasury,
-                "public_satisfaction": self.government.public_satisfaction
-            }
+                "public_satisfaction": self.government.public_satisfaction,
+                "inflation_rate": getattr(self.government, "inflation_rate", 0.02)
+            },
+            "bank": self.bank
         }
 
     def get_full_world_state(self) -> Dict[str, Any]:
         """
         Generate detailed world state for GET /api/simulations/{id}/world.
         Includes stable node IDs, citizen group aggregates, truthful flows,
-        and lightweight graph relationships prepared for Phase 4B interactive visualization.
+        and lightweight graph relationships prepared for interactive visualization.
         """
         world_summary = self.get_world_summary()
 
@@ -433,7 +565,7 @@ class MockSimulationEngine(SimulationEngine):
             for c in self.citizens
         ), 2)
 
-        # Derive lightweight Phase 4B graph relationships
+        # Derive graph relationships
         relationships = []
         
         # 1. Government -> Business infrastructure links
@@ -463,10 +595,22 @@ class MockSimulationEngine(SimulationEngine):
                 "employee_count": count
             })
 
+        # 3. Business Game Theory Rivalry links
+        for b in self.businesses:
+            if b.rival_business_id:
+                relationships.append({
+                    "id": f"rel:rivalry:{b.id}:{b.rival_business_id}",
+                    "source": str(b.id),
+                    "target": str(b.rival_business_id),
+                    "type": "rivalry",
+                    "move": getattr(b, "last_game_move", "COOPERATE")
+                })
+
         return {
             "simulation_id": str(self.simulation_id),
             "tick": self.tick,
             "government": world_summary["government"],
+            "bank": world_summary["bank"],
             "businesses": world_summary["businesses"],
             "citizen_groups": world_summary["citizen_groups"],
             "relationships": relationships,
@@ -474,7 +618,8 @@ class MockSimulationEngine(SimulationEngine):
                 "salary_total": salary_total,
                 "consumer_spending_total": consumer_spending_total,
                 "tax_total": tax_total,
-                "infrastructure_spending": self.government.infrastructure_spending
+                "infrastructure_spending": self.government.infrastructure_spending,
+                "healthcare_spending": getattr(self.government, "healthcare_spending", 30000.0)
             },
             "metrics": self.get_metrics().model_dump(mode="json")
         }
@@ -483,16 +628,68 @@ class MockSimulationEngine(SimulationEngine):
         """Export full engine state into a JSON-serializable dictionary."""
         return self.get_state()
 
-
     def import_state(self, state_dict: Dict[str, Any]) -> None:
-        """Import engine state from a JSON-serializable dictionary."""
+        """
+        Import engine state from a JSON-serializable dictionary.
+        CONSTRAINT #1: Safely supplies deterministic defaults for missing Phase 8 fields
+        when loading legacy Phase 1–7 snapshots!
+        """
         self.simulation_id = UUID(state_dict["simulation_id"])
         self.seed = state_dict["seed"]
         self.tick = state_dict["tick"]
         
-        self.government = GovernmentStateSchema.model_validate(state_dict["government"])
-        self.citizens = [CitizenState.model_validate(c) for c in state_dict["citizens"]]
-        self.businesses = [BusinessState.model_validate(b) for b in state_dict["businesses"]]
+        gov_raw = dict(state_dict["government"])
+        if "healthcare_spending" not in gov_raw:
+            gov_raw["healthcare_spending"] = 30000.0
+        if "inflation_rate" not in gov_raw:
+            gov_raw["inflation_rate"] = 0.02
+        self.government = GovernmentStateSchema.model_validate(gov_raw)
+
+        # Bank state backward compatibility
+        if "bank" in state_dict and state_dict["bank"]:
+            self.bank = dict(state_dict["bank"])
+        else:
+            self.bank = {
+                "interest_rate": 0.05,
+                "reserves": 1000000.0,
+                "default_rate": 0.02,
+                "total_loans": 12,
+                "approved_loans": 10,
+                "rejected_loans": 2,
+            }
+
+        self.manual_policy_lock_ticks = state_dict.get("manual_policy_lock_ticks", 0)
+
+        # Citizen state backward compatibility
+        citizens_list = []
+        for c_raw in state_dict["citizens"]:
+            c_dict = dict(c_raw)
+            if "trust" not in c_dict:
+                c_dict["trust"] = 0.70
+            if "tax_compliance" not in c_dict:
+                c_dict["tax_compliance"] = 0.85
+            citizens_list.append(CitizenState.model_validate(c_dict))
+        self.citizens = citizens_list
+
+        # Business state backward compatibility
+        personalities = ["AGGRESSIVE", "CONSERVATIVE", "INNOVATIVE", "NEUTRAL"]
+        businesses_list = []
+        for idx, b_raw in enumerate(state_dict["businesses"]):
+            b_dict = dict(b_raw)
+            if "capital" not in b_dict:
+                b_dict["capital"] = 50000.0
+            if "personality" not in b_dict:
+                b_dict["personality"] = personalities[idx % len(personalities)]
+            if "last_game_move" not in b_dict:
+                b_dict["last_game_move"] = "COOPERATE"
+            businesses_list.append(BusinessState.model_validate(b_dict))
+        self.businesses = businesses_list
+
+        # Re-pair rivalries if missing
+        for idx, b in enumerate(self.businesses):
+            if not b.rival_business_id and len(self.businesses) > 1:
+                b.rival_business_id = self.businesses[(idx + 1) % len(self.businesses)].id
+
         self.active_events = [EventState.model_validate(e) for e in state_dict.get("active_events", [])]
         
         if state_dict.get("metrics"):
@@ -504,3 +701,4 @@ class MockSimulationEngine(SimulationEngine):
             raw_rng = deserialize_rng_state(state_dict["rng_state"])
             self.rng = random.Random(self.seed)
             self.rng.setstate(raw_rng)
+
