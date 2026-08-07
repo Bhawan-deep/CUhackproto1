@@ -111,6 +111,21 @@ export async function getPolicyHistory(id) {
 }
 
 /**
+ * Retrieve lightweight timeline metadata and persisted intervention markers.
+ */
+export async function getTimeline(id) {
+  return apiRequest(`/api/simulations/${id}/timeline`);
+}
+
+/**
+ * Retrieve historical world state for a specific tick.
+ * STRICTLY READ-ONLY: Does not mutate simulation current_tick.
+ */
+export async function getSnapshotWorld(id, tick) {
+  return apiRequest(`/api/simulations/${id}/snapshots/${tick}`);
+}
+
+/**
  * Retrieve runtime runner status.
  */
 export async function getRuntimeStatus(id) {
@@ -123,3 +138,4 @@ export async function getRuntimeStatus(id) {
 export async function getSimulationMetrics(id) {
   return apiRequest(`/api/simulations/${id}/metrics`);
 }
+

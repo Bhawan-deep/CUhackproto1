@@ -24,7 +24,7 @@ const nodeTypes = {
   citizenGroup: CitizenGroupNode,
 };
 
-function FlowCanvas({ simulationId, liveState, baseline, impactDeltas, impactMode }) {
+function FlowCanvas({ simulationId, liveState, displayWorld, baseline, impactDeltas, impactMode, viewMode, viewedTick }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rawWorldData, setRawWorldData] = useState(null);
@@ -61,11 +61,10 @@ function FlowCanvas({ simulationId, liveState, baseline, impactDeltas, impactMod
     };
   }, [simulationId, setNodes, setEdges]);
 
-  // 2. Live WebSocket State Sync: Update node.data properties in-place without resetting positions or viewport
+  // 2. World State Sync (LIVE or REPLAY): Update node.data properties in-place without resetting positions, selection, or viewport
   useEffect(() => {
-    if (!liveState?.world_summary) return;
-
-    const summary = liveState.world_summary;
+    const summary = displayWorld || liveState?.world_summary;
+    if (!summary) return;
 
     setNodes((prevNodes) =>
       prevNodes.map((node) => {
@@ -139,7 +138,8 @@ function FlowCanvas({ simulationId, liveState, baseline, impactDeltas, impactMod
         return node;
       })
     );
-  }, [liveState, setNodes, impactMode, impactDeltas, baseline]);
+  }, [displayWorld, liveState, setNodes, impactMode, impactDeltas, baseline]);
+
 
   // 3. Highlight connected nodes and edges when a node is selected or impact mode is active
   const { highlightedNodes, highlightedEdgeIds } = useMemo(() => {
@@ -293,6 +293,8 @@ function FlowCanvas({ simulationId, liveState, baseline, impactDeltas, impactMod
           selectedNode={activeSelectedNode}
           baseline={baseline}
           impactDeltas={impactDeltas}
+          viewMode={viewMode}
+          viewedTick={viewedTick}
           onClose={() => setSelectedNodeId(null)}
         />
       )}
@@ -300,17 +302,30 @@ function FlowCanvas({ simulationId, liveState, baseline, impactDeltas, impactMod
   );
 }
 
-export default function EconomicWorld({ simulationId, liveState, baseline, impactDeltas, impactMode }) {
+export default function EconomicWorld({
+  simulationId,
+  liveState,
+  displayWorld,
+  baseline,
+  impactDeltas,
+  impactMode,
+  viewMode,
+  viewedTick
+}) {
   return (
     <ReactFlowProvider>
       <FlowCanvas
         simulationId={simulationId}
         liveState={liveState}
+        displayWorld={displayWorld}
         baseline={baseline}
         impactDeltas={impactDeltas}
         impactMode={impactMode}
+        viewMode={viewMode}
+        viewedTick={viewedTick}
       />
     </ReactFlowProvider>
   );
 }
+
 

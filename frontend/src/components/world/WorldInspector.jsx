@@ -1,11 +1,14 @@
 import React from 'react';
-import { X, Landmark, Building2, UserCheck, Activity, DollarSign, Users, Award, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
+import { X, Landmark, Building2, UserCheck, Activity, DollarSign, Users, Award, AlertTriangle, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 
-export default function WorldInspector({ selectedNode, baseline, impactDeltas, onClose }) {
+export default function WorldInspector({ selectedNode, baseline, impactDeltas, viewMode, viewedTick, onClose }) {
   if (!selectedNode) return null;
 
   const { data, type } = selectedNode;
   const nodeId = String(selectedNode.id);
+
+  const isReplay = viewMode === 'REPLAY';
+
 
   // Extract delta info for this specific node if baseline exists
   let nodeDelta = null;
@@ -47,6 +50,19 @@ export default function WorldInspector({ selectedNode, baseline, impactDeltas, o
 
       {/* Body Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs">
+        {/* REPLAY MODE HISTORICAL BANNER */}
+        {isReplay && (
+          <div className="p-2.5 rounded-lg bg-amber-950/70 border border-amber-500/50 flex items-center justify-between text-amber-200">
+            <div className="flex items-center gap-1.5 font-bold">
+              <Clock className="w-4 h-4 text-amber-400" />
+              <span>HISTORICAL STATE</span>
+            </div>
+            <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-bold text-[10px]">
+              MONTH {viewedTick}
+            </span>
+          </div>
+        )}
+
         {/* SINCE INTERVENTION DELTA SECTION */}
         {baseline && interventionInfo && (
           <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-500/40 space-y-2">

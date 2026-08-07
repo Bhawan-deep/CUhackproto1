@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Cpu, Radio, Clock, Settings, Activity, AlertTriangle, Zap, Eye } from 'lucide-react';
 import {
   getHealthStatus,
@@ -11,7 +11,9 @@ import {
   resetSimulation,
   updatePolicy,
   injectEvent,
-  getWorldState
+  getWorldState,
+  getTimeline,
+  getSnapshotWorld
 } from '../api/simulations';
 import { useSimulationSocket } from '../hooks/useSimulationSocket';
 import { createBaselineSnapshot, computeImpactDeltas } from '../utils/impactTracker';
@@ -22,6 +24,12 @@ import SimulationControls from '../components/world/SimulationControls';
 import EconomicWorld from '../components/world/EconomicWorld';
 import InterventionLab from '../components/lab/InterventionLab';
 import ImpactSummaryModal from '../components/lab/ImpactSummaryModal';
+import TimeMachine from '../components/timeline/TimeMachine';
+import HistoricalCompareModal from '../components/timeline/HistoricalCompareModal';
+import CounterfactualLabModal from '../components/experiment/CounterfactualLabModal';
+import ParallelUniverse from '../components/experiment/ParallelUniverse';
+import { createExperiment, runExperiment } from '../api/experiments';
+
 
 export default function Dashboard() {
   const [isBackendConnected, setIsBackendConnected] = useState(false);
@@ -42,6 +50,54 @@ export default function Dashboard() {
   const [impactMode, setImpactMode] = useState(false);
   const [activeBaseline, setActiveBaseline] = useState(null);
   const [interventionHistory, setInterventionHistory] = useState([]);
+
+  // Phase 6 Time Machine & Replay State
+  const [viewMode, setViewMode] = useState('LIVE'); // 'LIVE' | 'REPLAY'
+  const [viewedTick, setViewedTick] = useState(null);
+  const [replayWorld, setReplayWorld] = useState(null);
+  const [timelineData, setTimelineData] = useState(null);
+  const [compareMarker, setCompareMarker] = useState(null);
+  const [showPausePrompt, setShowPausePrompt] = useState(false);
+  const [pendingScrubTick, setPendingScrubTick] = useState(null);
+
+  // Phase 7 Counterfactual Experiment State
+  const [isForkModalOpen, setIsForkModalOpen] = useState(false);
+  const [forkTick, setForkTick] = useState(null);
+  const [experimentResult, setExperimentResult] = useState(null);
+
+  // Snapshot Cache & Race Condition Protection
+  const snapshotCacheRef = useRef(new Map());
+  const requestSeqRef = useRef(0);
+
+  const handleOpenForkModal = (targetTick) => {
+    setForkTick(targetTick !== undefined ? targetTick : (viewedTick !== null ? viewedTick : currentTick));
+    setIsForkModalOpen(true);
+  };
+
+  const handleLaunchExperiment = async (payload) => {
+    if (!selectedSimulation) return;
+    setIsActionPending(true);
+    try {
+      const exp = await createExperiment(selectedSimulation.id, {
+        source_tick: payload.source_tick,
+        horizon_ticks: payload.horizon_ticks
+      });
+
+      const result = await runExperiment(exp.id, {
+        horizon_ticks: payload.horizon_ticks,
+        variant_policy: payload.variant_policy,
+        variant_event: payload.variant_event
+      });
+
+      setIsForkModalOpen(false);
+      setExperimentResult(result);
+    } catch (err) {
+      setActionError(err.message || 'Failed to execute counterfactual experiment.');
+    } finally {
+      setIsActionPending(false);
+    }
+  };
+
 
   // Real-time WebSocket hook per selected simulation
   const { connectionState, liveState } = useSimulationSocket(selectedSimulation?.id);
@@ -94,23 +150,120 @@ export default function Dashboard() {
     }
   }, [liveState]);
 
-  // Reset baseline & history when selected simulation changes
+  // Fetch lightweight timeline metadata whenever selected simulation or current_tick changes
+  const currentTick = liveState?.tick !== undefined ? liveState.tick : (selectedSimulation?.current_tick || 0);
+
+  const fetchTimeline = useCallback(async () => {
+    if (!selectedSimulation) return;
+    try {
+      const data = await getTimeline(selectedSimulation.id);
+      setTimelineData(data);
+    } catch (err) {
+      console.error('[Dashboard] Failed to fetch timeline metadata:', err);
+    }
+  }, [selectedSimulation?.id]);
+
+  useEffect(() => {
+    fetchTimeline();
+  }, [fetchTimeline, currentTick]);
+
+  // Reset baseline, history, and snapshot cache when selected simulation changes
   useEffect(() => {
     setActiveBaseline(null);
     setInterventionHistory([]);
     setImpactMode(false);
     setIsImpactSummaryOpen(false);
+    setViewMode('LIVE');
+    setViewedTick(null);
+    setReplayWorld(null);
+    snapshotCacheRef.current.clear();
   }, [selectedSimulation?.id]);
 
-  // Calculate live impact deltas when baseline & live state exist
-  const currentMetrics = liveState?.metrics;
-  const currentWorldSummary = liveState?.world_summary;
-  const currentTick = liveState?.tick !== undefined ? liveState.tick : (selectedSimulation?.current_tick || 0);
+  // Load historical snapshot with race condition protection & local caching
+  const loadHistoricalSnapshot = useCallback(async (targetTick) => {
+    if (!selectedSimulation) return;
 
+    const cacheKey = `${selectedSimulation.id}:${targetTick}`;
+    if (snapshotCacheRef.current.has(cacheKey)) {
+      setReplayWorld(snapshotCacheRef.current.get(cacheKey));
+      setViewedTick(targetTick);
+      setViewMode('REPLAY');
+      return;
+    }
+
+    const currentSeq = ++requestSeqRef.current;
+
+    try {
+      const historicalWorld = await getSnapshotWorld(selectedSimulation.id, targetTick);
+      if (currentSeq === requestSeqRef.current) {
+        snapshotCacheRef.current.set(cacheKey, historicalWorld);
+        setReplayWorld(historicalWorld);
+        setViewedTick(targetTick);
+        setViewMode('REPLAY');
+      }
+    } catch (err) {
+      console.error(`[Dashboard] Failed to fetch historical snapshot for tick ${targetTick}:`, err);
+    }
+  }, [selectedSimulation?.id]);
+
+  // Handle Scrubbing Request with Pause Confirmation Prompt if RUNNING
+  const handleScrubTick = useCallback((targetTickOrUpdater) => {
+    const targetTick = typeof targetTickOrUpdater === 'function' ? targetTickOrUpdater(viewedTick !== null ? viewedTick : currentTick) : targetTickOrUpdater;
+    const status = liveState?.status || selectedSimulation?.status || 'created';
+
+    if (status === 'running') {
+      setPendingScrubTick(targetTick);
+      setShowPausePrompt(true);
+      return;
+    }
+
+    loadHistoricalSnapshot(targetTick);
+  }, [liveState, selectedSimulation, viewedTick, currentTick, loadHistoricalSnapshot]);
+
+  // Confirm Pause & Explore Replay
+  const handleConfirmPauseAndExplore = async () => {
+    setShowPausePrompt(false);
+    if (!selectedSimulation) return;
+    setIsActionPending(true);
+    try {
+      await pauseSimulation(selectedSimulation.id);
+      if (pendingScrubTick !== null) {
+        loadHistoricalSnapshot(pendingScrubTick);
+        setPendingScrubTick(null);
+      }
+    } catch (err) {
+      setActionError(err.message || 'Failed to pause simulation for replay.');
+    } finally {
+      setIsActionPending(false);
+    }
+  };
+
+  const handleReturnToLive = () => {
+    setViewMode('LIVE');
+    setViewedTick(null);
+    setReplayWorld(null);
+  };
+
+  // Derive Display World & Metrics (LIVE vs REPLAY)
+  const displayWorld = useMemo(() => {
+    if (viewMode === 'REPLAY' && replayWorld) {
+      return replayWorld;
+    }
+    return liveState?.world_summary || null;
+  }, [viewMode, replayWorld, liveState]);
+
+  const displayMetrics = useMemo(() => {
+    if (viewMode === 'REPLAY' && replayWorld?.metrics) {
+      return replayWorld.metrics;
+    }
+    return liveState?.metrics || null;
+  }, [viewMode, replayWorld, liveState]);
+
+  // Calculate live impact deltas when baseline & live state exist
   const impactDeltas = useMemo(() => {
-    if (!activeBaseline || !currentWorldSummary || !currentMetrics) return null;
-    return computeImpactDeltas(currentMetrics, currentWorldSummary, activeBaseline, null);
-  }, [activeBaseline, currentWorldSummary, currentMetrics]);
+    if (!activeBaseline || !displayWorld || !displayMetrics) return null;
+    return computeImpactDeltas(displayMetrics, displayWorld, activeBaseline, null);
+  }, [activeBaseline, displayWorld, displayMetrics]);
 
   const handleCreateDemoSimulation = async () => {
     setIsCreating(true);
@@ -128,7 +281,6 @@ export default function Dashboard() {
     } finally {
       setIsCreating(false);
     }
-
   };
 
   const handleStart = async () => {
@@ -177,6 +329,7 @@ export default function Dashboard() {
 
     try {
       await stepSimulation(selectedSimulation.id);
+      fetchTimeline();
     } catch (err) {
       setActionError(err.message || 'Failed to step simulation.');
     } finally {
@@ -194,6 +347,11 @@ export default function Dashboard() {
       setActiveBaseline(null);
       setInterventionHistory([]);
       setImpactMode(false);
+      setViewMode('LIVE');
+      setViewedTick(null);
+      setReplayWorld(null);
+      snapshotCacheRef.current.clear();
+      fetchTimeline();
     } catch (err) {
       setActionError(err.message || 'Failed to reset simulation.');
     } finally {
@@ -208,7 +366,6 @@ export default function Dashboard() {
     setActionError(null);
 
     try {
-      // 1. Fetch current world state immediately BEFORE request to capture true pre-intervention baseline
       const worldData = await getWorldState(selectedSimulation.id);
       const taxPct = Math.round(policyData.tax_rate * 100);
       const infraK = Math.round(policyData.infrastructure_spending / 1000);
@@ -220,13 +377,13 @@ export default function Dashboard() {
         appliedTick: currentTick
       };
 
-      const newBaseline = createBaselineSnapshot(currentTick, currentMetrics, worldData, info);
+      const newBaseline = createBaselineSnapshot(currentTick, displayMetrics, worldData, info);
       setActiveBaseline(newBaseline);
       setInterventionHistory(prev => [info, ...prev]);
       setImpactMode(true);
 
-      // 2. Call backend policy update endpoint
       await updatePolicy(selectedSimulation.id, policyData);
+      fetchTimeline();
 
     } catch (err) {
       setActionError(err.message || 'Failed to update policy.');
@@ -242,7 +399,6 @@ export default function Dashboard() {
     setActionError(null);
 
     try {
-      // 1. Fetch current world state immediately BEFORE request to capture true pre-intervention baseline
       const worldData = await getWorldState(selectedSimulation.id);
       const sevLabel = (eventData.severity * 100).toFixed(0);
       const eventName = eventData.type.toUpperCase().replace('_', ' ');
@@ -254,13 +410,13 @@ export default function Dashboard() {
         appliedTick: currentTick
       };
 
-      const newBaseline = createBaselineSnapshot(currentTick, currentMetrics, worldData, info);
+      const newBaseline = createBaselineSnapshot(currentTick, displayMetrics, worldData, info);
       setActiveBaseline(newBaseline);
       setInterventionHistory(prev => [info, ...prev]);
       setImpactMode(true);
 
-      // 2. Call backend event injection endpoint
       await injectEvent(selectedSimulation.id, eventData);
+      fetchTimeline();
 
     } catch (err) {
       setActionError(err.message || 'Failed to inject shock event.');
@@ -273,7 +429,8 @@ export default function Dashboard() {
   const isRunning = status === "running";
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#090D16] text-slate-100 font-sans overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#090D16] text-slate-100 font-sans overflow-hidden">
+
       {/* Top Main Application Header */}
       <header className="bg-[#0B111E] border-b border-slate-800/80 px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 z-20">
         {/* Brand & Live Indicator */}
@@ -284,7 +441,7 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="font-bold text-sm text-slate-100 tracking-wide uppercase">Agent Economy Digital Twin</h1>
-              <span className="text-[10px] text-slate-400 font-mono">MACROECONOMIC INTERACTION & CONSEQUENCE SIMULATOR</span>
+              <span className="text-[10px] text-slate-400 font-mono">MACROECONOMIC INTERACTION & TIME MACHINE SIMULATOR</span>
             </div>
           </div>
 
@@ -308,8 +465,9 @@ export default function Dashboard() {
           <div className="bg-slate-900 border border-slate-800 px-3 py-1 rounded text-xs font-mono flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5 text-sky-400" />
             <span className="text-slate-400">MONTH</span>
-            <span className="font-bold text-white text-sm">{currentTick}</span>
-            {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-1" />}
+            <span className="font-bold text-white text-sm">{viewMode === 'REPLAY' ? viewedTick : currentTick}</span>
+            {viewMode === 'REPLAY' && <span className="text-[9px] text-amber-400 font-bold ml-1">(REPLAY)</span>}
+            {isRunning && viewMode === 'LIVE' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-1" />}
           </div>
 
           {/* Compact Simulation Selector */}
@@ -337,7 +495,7 @@ export default function Dashboard() {
       </header>
 
       {/* Metric Strip Header Bar */}
-      <MetricStrip metrics={currentMetrics} />
+      <MetricStrip metrics={displayMetrics} />
 
       {/* Active Intervention Banner / Indicator */}
       {activeBaseline && activeBaseline.interventionInfo && (
@@ -410,9 +568,12 @@ export default function Dashboard() {
               <EconomicWorld
                 simulationId={selectedSimulation.id}
                 liveState={liveState}
+                displayWorld={displayWorld}
                 baseline={activeBaseline}
                 impactDeltas={impactDeltas}
                 impactMode={impactMode}
+                viewMode={viewMode}
+                viewedTick={viewedTick}
               />
             </>
           )
@@ -439,7 +600,82 @@ export default function Dashboard() {
             onClose={() => setIsImpactSummaryOpen(false)}
           />
         )}
+
+        {/* Historical Compare Side Modal */}
+        {compareMarker && selectedSimulation && (
+          <HistoricalCompareModal
+            simulationId={selectedSimulation.id}
+            marker={compareMarker}
+            currentTick={currentTick}
+            onClose={() => setCompareMarker(null)}
+          />
+        )}
+
+        {/* Pause Confirmation Modal when scrubbing while RUNNING */}
+        {showPausePrompt && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-mono text-xs">
+            <div className="bg-[#0B111E] border border-amber-500/60 rounded-xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <span>Pause Simulation for Replay?</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                The simulation runner is currently <strong>RUNNING</strong>. Entering historical replay requires pausing the runner so automatic background ticks do not disturb your historical exploration.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  onClick={() => { setShowPausePrompt(false); setPendingScrubTick(null); }}
+                  className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmPauseAndExplore}
+                  disabled={isActionPending}
+                  className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs"
+                >
+                  Pause & Explore
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Phase 7 Counterfactual Lab Modal */}
+        {isForkModalOpen && selectedSimulation && (
+          <CounterfactualLabModal
+            sourceSimId={selectedSimulation.id}
+            sourceTick={forkTick !== null ? forkTick : (viewedTick !== null ? viewedTick : currentTick)}
+            sourceWorld={displayWorld}
+            onLaunchExperiment={handleLaunchExperiment}
+            onClose={() => setIsForkModalOpen(false)}
+          />
+        )}
+
+        {/* Phase 7 Parallel Universe Results Overlay */}
+        {experimentResult && (
+          <ParallelUniverse
+            experimentResult={experimentResult}
+            onClose={() => setExperimentResult(null)}
+          />
+        )}
       </main>
+
+      {/* Phase 6 Time Machine Bottom Timeline Scrubber */}
+      {selectedSimulation && (
+        <TimeMachine
+          simulationId={selectedSimulation.id}
+          currentTick={currentTick}
+          timelineData={timelineData}
+          viewMode={viewMode}
+          viewedTick={viewedTick}
+          onScrubTick={handleScrubTick}
+          onReturnToLive={handleReturnToLive}
+          onOpenCompare={setCompareMarker}
+          onOpenFork={handleOpenForkModal}
+          isPaused={!isRunning}
+        />
+      )}
     </div>
   );
 }
+

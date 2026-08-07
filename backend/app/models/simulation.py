@@ -142,3 +142,21 @@ class Snapshot(Base):
     __table_args__ = (
         UniqueConstraint("simulation_id", "tick", name="uq_snapshot_sim_tick"),
     )
+
+
+class ParallelExperiment(Base):
+    __tablename__ = "parallel_experiments"
+
+    id = Column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_simulation_id = Column(Uuid(as_uuid=True), ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_tick = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=False, default="Counterfactual Experiment")
+    status = Column(String(50), nullable=False, default="CREATED")
+    horizon_ticks = Column(Integer, nullable=False, default=12)
+    baseline_simulation_id = Column(Uuid(as_uuid=True), ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False)
+    variant_simulation_id = Column(Uuid(as_uuid=True), ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False)
+    configuration = Column(JSON, nullable=False, default=dict)
+    comparison_results = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+

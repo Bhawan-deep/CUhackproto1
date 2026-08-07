@@ -249,3 +249,30 @@ def get_policy_history(
     return SimulationService.get_policy_history(db, simulation_id)
 
 
+@router.get("/{simulation_id}/timeline")
+def get_timeline(
+    simulation_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve lightweight timeline metadata for a simulation.
+    Returns current_tick, snapshot tick list, and persisted intervention markers.
+    Does NOT return full snapshot JSONB payload.
+    """
+    return SimulationService.get_timeline(db, simulation_id)
+
+
+@router.get("/{simulation_id}/snapshots/{tick}")
+def get_snapshot_world(
+    simulation_id: UUID,
+    tick: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve historical world state for a specific tick.
+    STRICTLY READ-ONLY: Deserializes snapshot safely without mutating simulation current_tick.
+    """
+    return SimulationService.get_snapshot_world(db, simulation_id, tick)
+
+
+
