@@ -8,11 +8,14 @@ class Base(DeclarativeBase):
     pass
 
 
+db_url = settings.normalized_database_url
+
 engine = create_engine(
-    settings.DATABASE_URL,
+    db_url,
     pool_pre_ping=True,
-    connect_args={"connect_timeout": 3} if settings.DATABASE_URL.startswith("postgresql") else {}
+    connect_args={"connect_timeout": 5} if db_url.startswith("postgresql") else {}
 )
+
 
 
 SessionLocal = sessionmaker(
