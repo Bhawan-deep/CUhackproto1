@@ -12,7 +12,7 @@ export default memo(function CitizenGroupNode({ data, selected }) {
   const isImpactActive = data.isImpactActive;
 
   return (
-    <div className={`px-3 py-2 rounded-xl border transition-all duration-300 bg-[#0B132B] shadow-md min-w-[160px] ${
+    <div className={`px-3 py-2 rounded-xl border transition-all duration-300 bg-[#0F172A] shadow-md min-w-[160px] ${
       selected 
         ? 'border-sky-400 ring-2 ring-sky-400/40 shadow-sky-500/20' 
         : isImpactActive
