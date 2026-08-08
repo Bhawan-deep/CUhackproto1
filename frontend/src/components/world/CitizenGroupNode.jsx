@@ -12,29 +12,29 @@ export default memo(function CitizenGroupNode({ data, selected }) {
   const isImpactActive = data.isImpactActive;
 
   return (
-    <div className={`px-3 py-2 rounded-xl border transition-all duration-300 bg-[#0F172A] shadow-md min-w-[160px] ${
+    <div className={`px-3 py-2 rounded-xl border transition-all duration-300 bg-[#131127]/90 shadow-md min-w-[160px] ${
       selected 
-        ? 'border-sky-400 ring-2 ring-sky-400/40 shadow-sky-500/20' 
+        ? 'border-purple-400 ring-2 ring-purple-400/40 shadow-purple-500/20' 
         : isImpactActive
         ? 'border-amber-500/80 ring-2 ring-amber-500/40'
-        : 'border-slate-800 hover:border-slate-600'
+        : 'border-purple-500/40 hover:border-purple-400/80'
     }`}>
-      <Handle type="target" position={Position.Top} className="!bg-slate-400 !w-2 !h-2 !border-2 !border-slate-900" />
+      <Handle type="target" position={Position.Top} className="!bg-purple-400 !w-2 !h-2 !border-2 !border-slate-900" />
       
-      <div className="flex items-center justify-between gap-1 mb-1 border-b border-slate-800/80 pb-1">
+      <div className="flex items-center justify-between gap-1 mb-1 border-b border-purple-900/60 pb-1">
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <UserCheck className="w-3 h-3 text-sky-400 shrink-0" />
-          <span className="font-semibold text-xs text-slate-200 truncate">{data.occupation}</span>
+          <UserCheck className="w-3 h-3 text-purple-300 shrink-0" />
+          <span className="font-semibold text-xs text-purple-100 truncate">{data.occupation}</span>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
         <div>
-          <span className="text-slate-500 block text-[8px]">EMPLOYED</span>
+          <span className="text-purple-300/70 block text-[8px]">EMPLOYED</span>
           <span className="text-emerald-400 font-semibold">{empCount}/{count} ({empPct}%)</span>
         </div>
         <div>
-          <span className="text-slate-500 block text-[8px]">SATISFACTION</span>
+          <span className="text-purple-300/70 block text-[8px]">SATISFACTION</span>
           <span className="text-amber-300 font-semibold flex items-center gap-0.5">
             <Smile className="w-2.5 h-2.5 text-amber-400" />
             {satPct}%
@@ -44,8 +44,8 @@ export default memo(function CitizenGroupNode({ data, selected }) {
 
       {/* Impact Mode Delta Badges */}
       {isImpactActive && deltaInfo && (
-        <div className="mt-1 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[8px] font-mono">
-          <span className="text-slate-400">IMPACT:</span>
+        <div className="mt-1 pt-1 border-t border-purple-900/60 flex items-center justify-between text-[8px] font-mono">
+          <span className="text-purple-300/70">IMPACT:</span>
           {deltaInfo.employedCount?.delta !== undefined && (
             <span className={`font-bold flex items-center gap-0.5 ${deltaInfo.employedCount.delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {deltaInfo.employedCount.delta >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
