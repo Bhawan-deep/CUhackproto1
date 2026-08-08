@@ -22,9 +22,9 @@ function MoneyFlowEdge({
     targetPosition,
   });
 
-  // Unified single subtle blue color scheme for all strings / edge lines
-  const strokeColor = '#0284c7';
-  const particleColor = '#38bdf8';
+  // Light purple color scheme for all strings / edge connection lines
+  const strokeColor = '#8b5cf6';
+  const particleColor = '#c084fc';
   const strokeWidth = 1.4;
   const dashArray = '6,4';
   const animationDuration = '2.2s';
@@ -39,21 +39,21 @@ function MoneyFlowEdge({
         markerEnd={markerEnd}
         style={{
           ...style,
-          stroke: isPulseActive ? '#38bdf8' : strokeColor,
+          stroke: isPulseActive ? '#d8b4fe' : strokeColor,
           strokeWidth: isPulseActive ? strokeWidth * 1.6 : strokeWidth,
-          opacity: isPulseActive ? 0.9 : 0.45,
+          opacity: isPulseActive ? 0.95 : 0.5,
           transition: 'all 0.3s ease-in-out',
         }}
       />
-      {/* Animated Single-Color Blue Flow Overlay */}
+      {/* Animated Light Purple Flow Overlay */}
       <path
         d={edgePath}
         fill="none"
-        stroke={particleColor}
+        stroke={isPulseActive ? '#f472b6' : particleColor}
         strokeWidth={isPulseActive ? strokeWidth * 2.0 : strokeWidth * 1.2}
         strokeDasharray={dashArray}
         style={{
-          opacity: isPulseActive ? 1.0 : 0.65,
+          opacity: isPulseActive ? 1.0 : 0.75,
           animation: `flowDash ${animationDuration} linear infinite`,
         }}
       />
