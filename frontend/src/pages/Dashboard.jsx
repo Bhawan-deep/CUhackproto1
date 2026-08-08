@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Cpu, Radio, Clock, Settings, Activity, AlertTriangle, Zap, Eye } from 'lucide-react';
+import { RefreshCw, Cpu, Radio, Clock, Settings, Activity, AlertTriangle, Zap, Eye, Scale } from 'lucide-react';
 import {
   getHealthStatus,
   getSimulations,
@@ -31,7 +31,8 @@ import ParallelUniverse from '../components/experiment/ParallelUniverse';
 import { createExperiment, runExperiment } from '../api/experiments';
 
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigateToBounties }) {
+
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [isCheckingHealth, setIsCheckingHealth] = useState(true);
   const [healthError, setHealthError] = useState(null);
@@ -491,8 +492,21 @@ export default function Dashboard() {
             onStep={handleStep}
             onReset={handleReset}
           />
+
+          {/* Bounty Workspace Navigation Control */}
+          {onNavigateToBounties && (
+            <button
+              onClick={onNavigateToBounties}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-semibold rounded bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-amber-400 hover:text-amber-300 transition-colors shadow-sm"
+              title="Open Bounty Workspace (Legal Intelligence & Review Desk)"
+            >
+              <Scale className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">BOUNTY WORKSPACE</span>
+            </button>
+          )}
         </div>
       </header>
+
 
       {/* Metric Strip Header Bar */}
       <MetricStrip metrics={displayMetrics} />
